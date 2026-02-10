@@ -14,7 +14,7 @@ cd ~/projects/tts-mcp-server
 uv venv && uv pip install -e .
 
 # Pre-download the TTS model (~200 MB, one-time):
-.venv/bin/python -c "from mlx_audio.tts.utils import load_model; load_model('mlx-community/Kokoro-82M-bf16')"
+uv python onetimer.py
 ```
 
 Register with Claude Code (user-wide, available in all projects):
@@ -43,25 +43,25 @@ passed".
 
 Full TTS with voice and speed control.
 
-| Parameter | Default     | Range / Options |
-|-----------|-------------|-----------------|
-| `text`    | *(required)* | Any string |
-| `voice`   | `af_heart`  | See [voices](#voices) |
-| `speed`   | `1.2`       | 0.5 -- 2.0 |
+| Parameter | Default      | Range / Options       |
+| --------- | ------------ | --------------------- |
+| `text`    | _(required)_ | Any string            |
+| `voice`   | `af_heart`   | See [voices](#voices) |
+| `speed`   | `1.2`        | 0.5 -- 2.0            |
 
 ## Voices
 
 Kokoro ships 54 presets. A useful subset:
 
-| ID          | Description       |
-|-------------|-------------------|
+| ID          | Description               |
+| ----------- | ------------------------- |
 | `af_heart`  | American female (default) |
-| `af_bella`  | American female   |
-| `af_nova`   | American female   |
-| `am_adam`   | American male     |
-| `am_echo`   | American male     |
-| `bf_emma`   | British female    |
-| `bm_george` | British male      |
+| `af_bella`  | American female           |
+| `af_nova`   | American female           |
+| `am_adam`   | American male             |
+| `am_echo`   | American male             |
+| `bf_emma`   | British female            |
+| `bm_george` | British male              |
 
 Full list: prefix `af_` / `am_` (American), `bf_` / `bm_` (British),
 `jf_` / `jm_` (Japanese), `zf_` / `zm_` (Chinese).
@@ -82,11 +82,11 @@ Claude Code  ──stdio──>  FastMCP server  ──>  MLX-audio/Kokoro  ─�
 
 ## Performance (M2 Max)
 
-| Metric | First call | Subsequent |
-|--------|-----------|------------|
-| Latency (short phrase) | ~6 s | ~0.1 s |
-| Memory | ~420 MB | ~420 MB |
-| CPU | < 5% (GPU-accelerated) | < 5% |
+| Metric                 | First call             | Subsequent |
+| ---------------------- | ---------------------- | ---------- |
+| Latency (short phrase) | ~6 s                   | ~0.1 s     |
+| Memory                 | ~420 MB                | ~420 MB    |
+| CPU                    | < 5% (GPU-accelerated) | < 5%       |
 
 ## Troubleshooting
 
@@ -109,6 +109,7 @@ handle it. If you somehow end up without it, reinstall.
 cross-platform).
 
 **Model download fails:** Pre-download manually:
+
 ```bash
 .venv/bin/huggingface-cli download mlx-community/Kokoro-82M-bf16
 ```
