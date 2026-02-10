@@ -5,6 +5,7 @@ Exposes a ``notify`` tool for task completion alerts and a ``speak`` tool
 for general-purpose TTS with voice/speed control.
 """
 
+import argparse
 import asyncio
 import functools
 import logging
@@ -109,8 +110,33 @@ def _validate_speed(speed: float) -> None:
         raise ValueError(f"Speed must be 0.5–2.0, got {speed}")
 
 
-if __name__ == "__main__":
+def main():
     logger.info("Starting TTS MCP server ...")
     # Start the MCP transport immediately so the handshake succeeds,
     # then warm up the model lazily on first tool call.
     mcp.run(transport="stdio")
+
+
+def init():
+    model = load_model()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="TTS MCP server for Claude Code — Kokoro-82M on Apple Silicon.",
+        epilog="Run without arguments to start the MCP server.",
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=["init"],
+        default=None,
+        help="'init' to pre-download the TTS model (~200 MB).",
+    )
+    args = parser.parse_args()
+
+    if args.command == "init":
+        logger.info("Preloading model for faster first response...")
+        init()
+    else:
+        main()

@@ -14,15 +14,14 @@ cd ~/projects/tts-mcp-server
 uv venv && uv pip install -e .
 
 # Pre-download the TTS model (~200 MB, one-time):
-uv python onetimer.py
+uv run tts-mcp-init
 ```
 
 Register with Claude Code (user-wide, available in all projects):
 
 ```bash
 claude mcp add --transport stdio --scope user tts -- \
-  /path/to/tts-mcp-server/.venv/bin/python \
-  /path/to/tts-mcp-server/tts_server.py
+  /path/to/tts-mcp-server/.venv/bin/tts-mcp-server
 ```
 
 Verify:
@@ -92,8 +91,8 @@ Claude Code  ──stdio──>  FastMCP server  ──>  MLX-audio/Kokoro  ─�
 
 **Server shows `✗ Failed to connect`:** The model is loading during the health
 check. This was fixed by deferring model load to first tool call. If you still
-see this, ensure you're using the version of `tts_server.py` that calls
-`mcp.run()` immediately in `__main__`.
+see this, ensure `main()` calls `mcp.run()` immediately (before any model
+loading).
 
 **First call is slow (~6 s):** Expected. Spacy G2P pipeline and Metal shader
 compilation happen once per server lifetime. After that, calls are sub-200 ms.
@@ -108,9 +107,12 @@ handle it. If you somehow end up without it, reinstall.
 `_play()` with your platform's audio player (e.g., `paplay` on Linux, `sox`
 cross-platform).
 
-**Model download fails:** Pre-download manually:
+**Model download fails:** Pre-download with the init script, or manually via
+`huggingface-cli`:
 
 ```bash
+uv run tts-mcp-init
+# or:
 .venv/bin/huggingface-cli download mlx-community/Kokoro-82M-bf16
 ```
 

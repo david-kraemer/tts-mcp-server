@@ -9,3 +9,7 @@ dependencies = [
     "soundfile>=0.12.1",
     "en_core_web_sm@https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
 ]
+
+[project.scripts]
+tts-mcp-server = "tts_server:main"
+tts-mcp-init = "tts_server:init"
