@@ -80,7 +80,7 @@ def load_model(path: pathlib.Path = HUGGINGFACE_REPO) -> Module:
     logger.info("Loading model %s ...", path)
     model = mlx_load_model(path)
     # Warmup: compile Metal shaders so the first real call is fast.
-    list(model.generate("warmup", voice=DEFAULT_VOICE))
+    list(model.generate("warmup"))
     logger.info("Model loaded and warmed up.")
     return model
 
@@ -94,7 +94,7 @@ def temp_dir() -> pathlib.Path:
 
 def generate(text: str, voice: str = DEFAULT_VOICE, speed: float = SPEED) -> mx.array:
     """Run TTS inference, return raw audio array."""
-    model = load_model(voice=voice)
+    model = load_model()
     chunks = [
         r.audio
         for r in model.generate(text=text, voice=voice, speed=speed, lang_code="a")
