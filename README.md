@@ -11,16 +11,10 @@ the ability to speak task notifications and arbitrary text aloud.
 
 ```bash
 cd ~/projects/tts-mcp-server
-uv venv && source .venv/bin/activate
-uv pip install -e .
-
-# Kokoro's G2P (misaki) needs a spacy language model.
-# spacy tries to `pip install` it at runtime, which hangs in uv-managed venvs.
-# Install it explicitly:
-uv pip install en_core_web_sm@https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+uv venv && uv pip install -e .
 
 # Pre-download the TTS model (~200 MB, one-time):
-python -c "from mlx_audio.tts.utils import load_model; load_model('mlx-community/Kokoro-82M-bf16')"
+.venv/bin/python -c "from mlx_audio.tts.utils import load_model; load_model('mlx-community/Kokoro-82M-bf16')"
 ```
 
 Register with Claude Code (user-wide, available in all projects):
@@ -53,7 +47,7 @@ Full TTS with voice and speed control.
 |-----------|-------------|-----------------|
 | `text`    | *(required)* | Any string |
 | `voice`   | `af_heart`  | See [voices](#voices) |
-| `speed`   | `1.0`       | 0.5 -- 2.0 |
+| `speed`   | `1.2`       | 0.5 -- 2.0 |
 
 ## Voices
 
@@ -106,10 +100,9 @@ compilation happen once per server lifetime. After that, calls are sub-200 ms.
 
 **First call hangs indefinitely:** The spacy `en_core_web_sm` model is missing.
 Misaki's G2P calls `spacy.cli.download()` at runtime, which shells out to `pip`
--- but uv-managed venvs don't have `pip`, so it hangs forever. Fix:
-```bash
-uv pip install en_core_web_sm@https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
-```
+-- but uv-managed venvs don't have `pip`, so it hangs forever. This model is
+declared as a dependency in `pyproject.toml`, so `uv pip install -e .` should
+handle it. If you somehow end up without it, reinstall.
 
 **`afplay` not found:** You're not on macOS. Replace the `afplay` call in
 `_play()` with your platform's audio player (e.g., `paplay` on Linux, `sox`
@@ -117,8 +110,7 @@ cross-platform).
 
 **Model download fails:** Pre-download manually:
 ```bash
-pip install huggingface-hub
-huggingface-cli download mlx-community/Kokoro-82M-bf16
+.venv/bin/huggingface-cli download mlx-community/Kokoro-82M-bf16
 ```
 
 ## License
