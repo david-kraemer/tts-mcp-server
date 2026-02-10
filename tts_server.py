@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_VOICE = "af_heart"
 SAMPLE_RATE = 24000
 SPEED = 1.2
-HUGGINGFACE_REPO = pathlib.Path("mlx-community/Kokoro-82M-bf16")
+HUGGINGFACE_REPO = "mlx-community/Kokoro-82M-bf16"
 
 
 mcp = FastMCP("TTS Notification Server")
