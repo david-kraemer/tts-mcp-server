@@ -14,7 +14,7 @@ import pathlib
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field as dataclass_field
+import dataclasses
 
 import mlx.core as mx
 import soundfile as sf
@@ -39,13 +39,13 @@ HUGGINGFACE_REPO = "mlx-community/Kokoro-82M-bf16"
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, order=True)
+@dataclasses.dataclass(frozen=True, order=True)
 class PlaybackItem:
     """Priority queue entry. Lower priority = more urgent (heapq convention)."""
 
     priority: int
     seq: int
-    audio: mx.array = dataclass_field(compare=False)
+    audio: mx.array = dataclasses.field(compare=False)
 
 
 class PlaybackQueue:
