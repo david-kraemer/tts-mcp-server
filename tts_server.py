@@ -14,7 +14,7 @@ import pathlib
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import NamedTuple
+from dataclasses import dataclass, field as dataclass_field
 
 import mlx.core as mx
 import soundfile as sf
@@ -38,58 +38,56 @@ HUGGINGFACE_REPO = "mlx-community/Kokoro-82M-bf16"
 # Playback queue — serializes audio output from concurrent tool calls
 # ---------------------------------------------------------------------------
 
-_counter = itertools.count()
-_queue: asyncio.PriorityQueue["PlaybackItem"] | None = None
-_worker_task: asyncio.Task[None] | None = None
 
-
-class PlaybackItem(NamedTuple):
+@dataclass(frozen=True, order=True)
+class PlaybackItem:
     """Priority queue entry. Lower priority = more urgent (heapq convention)."""
 
     priority: int
     seq: int
-    audio: mx.array
+    audio: mx.array = dataclass_field(compare=False)
 
 
-def enqueue(audio: mx.array, priority: int = 10) -> None:
-    """Add audio to the playback queue. Non-blocking."""
-    if _queue is None:
-        raise RuntimeError("Playback worker not started — call start_worker() first")
-    _queue.put_nowait(PlaybackItem(priority, next(_counter), audio))
+class PlaybackQueue:
+    """Async priority queue with a background worker that plays audio sequentially."""
 
+    def __init__(self) -> None:
+        self._counter = itertools.count()
+        self._queue: asyncio.PriorityQueue[PlaybackItem] = asyncio.PriorityQueue()
+        self._worker: asyncio.Task[None] | None = None
 
-def _start_worker() -> None:
-    """Start the background playback task. Call once at server startup."""
-    global _queue, _worker_task
-    _queue = asyncio.PriorityQueue()
-    _worker_task = asyncio.create_task(_drain())
-    logger.info("Playback worker started.")
+    def start(self) -> None:
+        """Start the background drain task."""
+        self._worker = asyncio.create_task(self._drain())
+        logger.info("Playback worker started.")
 
+    async def stop(self) -> None:
+        """Cancel the worker and clean up."""
+        if self._worker is not None:
+            self._worker.cancel()
+            try:
+                await self._worker
+            except asyncio.CancelledError:
+                pass
+            self._worker = None
+        logger.info("Playback worker stopped.")
 
-async def _stop_worker() -> None:
-    """Cancel the background task and drain remaining items."""
-    global _worker_task, _queue
-    if _worker_task is not None:
-        _worker_task.cancel()
-        try:
-            await _worker_task
-        except asyncio.CancelledError:
-            pass
-        _worker_task = None
-    _queue = None
-    logger.info("Playback worker stopped.")
+    def enqueue(self, audio: mx.array, priority: int = 10) -> None:
+        """Add audio to the queue. Non-blocking."""
+        self._queue.put_nowait(
+            PlaybackItem(priority, next(self._counter), audio)
+        )
 
-
-async def _drain() -> None:
-    """Worker loop: pull items and play them sequentially."""
-    while True:
-        item = await _queue.get()
-        try:
-            await _play(item.audio)
-        except Exception:
-            logger.exception("Playback failed")
-        finally:
-            _queue.task_done()
+    async def _drain(self) -> None:
+        """Pull items and play them one at a time."""
+        while True:
+            item = await self._queue.get()
+            try:
+                await _play(item.audio)
+            except Exception:
+                logger.exception("Playback failed")
+            finally:
+                self._queue.task_done()
 
 
 async def _play(audio: mx.array) -> None:
@@ -110,6 +108,9 @@ async def _play(audio: mx.array) -> None:
         path.unlink(missing_ok=True)
 
 
+_playback: PlaybackQueue | None = None
+
+
 # ---------------------------------------------------------------------------
 # MCP server
 # ---------------------------------------------------------------------------
@@ -118,11 +119,14 @@ async def _play(audio: mx.array) -> None:
 @asynccontextmanager
 async def lifespan(_server: FastMCP) -> AsyncIterator[dict]:
     """Start/stop the playback worker with the server lifecycle."""
-    _start_worker()
+    global _playback
+    _playback = PlaybackQueue()
+    _playback.start()
     try:
         yield {}
     finally:
-        await _stop_worker()
+        await _playback.stop()
+        _playback = None
 
 
 mcp = FastMCP("TTS Notification Server", lifespan=lifespan)
@@ -136,7 +140,7 @@ async def notify(message: str, speed: float = SPEED) -> str:
     """
     _validate_speed(speed)
     audio = generate(message, speed=speed)
-    enqueue(audio)
+    _playback.enqueue(audio)
     return f"Notified: {message}"
 
 
@@ -150,7 +154,7 @@ async def speak(text: str, voice: str = DEFAULT_VOICE, speed: float = SPEED) -> 
     """
     _validate_speed(speed)
     audio = generate(text, voice=voice, speed=speed)
-    enqueue(audio)
+    _playback.enqueue(audio)
     dur = len(audio) / SAMPLE_RATE
     return f"Spoke {len(text)} chars in {dur:.1f}s (voice={voice}, speed={speed}x)"
 
