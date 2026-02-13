@@ -8,9 +8,13 @@ for general-purpose TTS with voice/speed control.
 import argparse
 import asyncio
 import functools
+import itertools
 import logging
 import pathlib
 import tempfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+import dataclasses
 
 import mlx.core as mx
 import soundfile as sf
@@ -30,7 +34,102 @@ SPEED = 1.2
 HUGGINGFACE_REPO = "mlx-community/Kokoro-82M-bf16"
 
 
-mcp = FastMCP("TTS Notification Server")
+# ---------------------------------------------------------------------------
+# Playback queue — serializes audio output from concurrent tool calls
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True, order=True)
+class PlaybackItem:
+    """Priority queue entry. Lower priority = more urgent (heapq convention)."""
+
+    priority: int
+    seq: int
+    audio: mx.array = dataclasses.field(compare=False)
+
+
+class PlaybackQueue:
+    """Async priority queue with a background worker that plays audio sequentially."""
+
+    def __init__(self) -> None:
+        self._counter = itertools.count()
+        self._queue: asyncio.PriorityQueue[PlaybackItem] = asyncio.PriorityQueue()
+        self._worker: asyncio.Task[None] | None = None
+
+    def start(self) -> None:
+        """Start the background drain task."""
+        self._worker = asyncio.create_task(self._drain())
+        logger.info("Playback worker started.")
+
+    async def stop(self) -> None:
+        """Cancel the worker and clean up."""
+        if self._worker is not None:
+            self._worker.cancel()
+            try:
+                await self._worker
+            except asyncio.CancelledError:
+                pass
+            self._worker = None
+        logger.info("Playback worker stopped.")
+
+    def enqueue(self, audio: mx.array, priority: int = 10) -> None:
+        """Add audio to the queue. Non-blocking."""
+        self._queue.put_nowait(
+            PlaybackItem(priority, next(self._counter), audio)
+        )
+
+    async def _drain(self) -> None:
+        """Pull items and play them one at a time."""
+        while True:
+            item = await self._queue.get()
+            try:
+                await _play(item.audio)
+            except Exception:
+                logger.exception("Playback failed")
+            finally:
+                self._queue.task_done()
+
+
+async def _play(audio: mx.array) -> None:
+    """Write audio to a temp WAV and play via afplay."""
+    path = pathlib.Path(tempfile.mktemp(suffix=".wav", prefix="tts_"))
+    try:
+        sf.write(str(path), audio, SAMPLE_RATE)
+        proc = await asyncio.create_subprocess_exec(
+            "afplay",
+            str(path),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"afplay failed: {stderr.decode()}")
+    finally:
+        path.unlink(missing_ok=True)
+
+
+_playback: PlaybackQueue | None = None
+
+
+# ---------------------------------------------------------------------------
+# MCP server
+# ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def lifespan(_server: FastMCP) -> AsyncIterator[dict]:
+    """Start/stop the playback worker with the server lifecycle."""
+    global _playback
+    _playback = PlaybackQueue()
+    _playback.start()
+    try:
+        yield {}
+    finally:
+        await _playback.stop()
+        _playback = None
+
+
+mcp = FastMCP("TTS Notification Server", lifespan=lifespan)
 
 
 @mcp.tool()
@@ -41,7 +140,7 @@ async def notify(message: str, speed: float = SPEED) -> str:
     """
     _validate_speed(speed)
     audio = generate(message, speed=speed)
-    await play(audio)
+    _playback.enqueue(audio)
     return f"Notified: {message}"
 
 
@@ -55,25 +154,9 @@ async def speak(text: str, voice: str = DEFAULT_VOICE, speed: float = SPEED) -> 
     """
     _validate_speed(speed)
     audio = generate(text, voice=voice, speed=speed)
-    await play(audio)
+    _playback.enqueue(audio)
     dur = len(audio) / SAMPLE_RATE
     return f"Spoke {len(text)} chars in {dur:.1f}s (voice={voice}, speed={speed}x)"
-
-
-async def play(audio: mx.array) -> None:
-    """Write audio to a temp WAV and play via afplay."""
-    path = temp_dir() / "out.wav"
-    sf.write(str(path), audio, SAMPLE_RATE)
-    proc = await asyncio.create_subprocess_exec(
-        "afplay",
-        str(path),
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(f"afplay failed: {stderr.decode()}")
-    path.unlink(missing_ok=True)
 
 
 @functools.lru_cache
@@ -84,13 +167,6 @@ def load_model(path: pathlib.Path = HUGGINGFACE_REPO) -> Module:
     list(model.generate("warmup"))
     logger.info("Model loaded and warmed up.")
     return model
-
-
-@functools.lru_cache
-def temp_dir() -> pathlib.Path:
-    """Get the temp directory path, creating it if necessary."""
-    _temp_dir = pathlib.Path(tempfile.mkdtemp(prefix="tts_"))
-    return _temp_dir
 
 
 def generate(text: str, voice: str = DEFAULT_VOICE, speed: float = SPEED) -> mx.array:
@@ -118,7 +194,7 @@ def main():
 
 
 def init():
-    model = load_model()
+    load_model()
 
 
 if __name__ == "__main__":
